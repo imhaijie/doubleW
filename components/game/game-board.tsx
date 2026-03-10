@@ -1,9 +1,9 @@
 'use client'
 
-import { GameRoom, Player, GameAction, GamePhase } from '@/lib/types'
+import { GameRoom, Player, GameAction, GamePhase, Role } from '@/lib/types'
 import { Button } from '@/components/ui/button'
-import { ROLE_NAMES } from '@/lib/constants'
-import { AlertCircle, Clock } from 'lucide-react'
+import { ROLE_NAMES, PHASE_NAMES } from '@/lib/constants'
+import { useState } from 'react'
 
 interface GameBoardProps {
   room: GameRoom
@@ -11,7 +11,11 @@ interface GameBoardProps {
   currentPlayer: Player | null
   onAction: (action: GameAction) => void
   onSkipPhase: () => void
-  onForceEnd: (winner: 'good' | 'werewolf') => void
+  onForceEnd: (winner: 'villagers' | 'werewolves') => void
+  isHost: boolean
+  timeLeft: number
+  canPerformAction: (actionType: string) => boolean
+  getCurrentRole: () => Role | null
 }
 
 export default function GameBoard({
@@ -21,25 +25,17 @@ export default function GameBoard({
   onAction,
   onSkipPhase,
   onForceEnd,
+  isHost,
+  timeLeft,
+  canPerformAction,
+  getCurrentRole,
 }: GameBoardProps) {
-  const phaseNames: Record<GamePhase, string> = {
-    waiting: '等待中',
-    ready: '准备中',
-    assign_roles: '分配身份',
-    night_werewolf: '狼人杀人',
-    night_seer: '预言家查验',
-    night_witch: '女巫操作',
-    night_guard: '守卫保护',
-    hunter_trigger: '猎人触发',
-    day_announce: '死亡公告',
-    day_speech: '白天发言',
-    day_vote: '白天投票',
-    day_revote: '白天重投',
-    game_end: '游戏结束',
-  }
-
   const isNightPhase = room.currentPhase.includes('night')
   const isDayPhase = room.currentPhase.includes('day')
+  const currentRole = getCurrentRole()
+  
+  // 检查房主是否双死（用于强制终局）
+  const isHostDead = currentPlayer && !currentPlayer.identity1Alive && !currentPlayer.identity2Alive
 
   return (
     <main className="min-h-screen bg-background">
@@ -52,155 +48,203 @@ export default function GameBoard({
                 isNightPhase ? 'bg-blue-500' : isDayPhase ? 'bg-yellow-500' : 'bg-gray-500'
               }`}></div>
               <h1 className="text-2xl font-bold text-foreground">
-                {isNightPhase && `第${room.nightRound}夜`}
-                {isDayPhase && `第${room.dayRound}天`}
+                {isNightPhase && `第${room.currentDay}夜`}
+                {isDayPhase && `第${room.currentDay}天`}
                 {room.currentPhase === 'game_end' && '游戏结束'}
               </h1>
             </div>
-            <div className="text-sm text-muted-foreground">
-              {phaseNames[room.currentPhase]}
+            <div className="flex items-center gap-4">
+              {timeLeft > 0 && (
+                <div className="text-lg font-mono text-primary">
+                  {Math.floor(timeLeft / 60)}:{(timeLeft % 60).toString().padStart(2, '0')}
+                </div>
+              )}
+              <div className="text-sm text-muted-foreground">
+                {PHASE_NAMES[room.currentPhase] || room.currentPhase}
+              </div>
             </div>
           </div>
 
-          {/* 日志区域 */}
-          <div className="bg-background/50 rounded border border-border p-3 max-h-24 overflow-y-auto text-sm text-muted-foreground">
-            {room.gameLog.slice(-3).map((log, idx) => (
-              <div key={idx}>{log.message}</div>
-            ))}
-          </div>
+          {/* 计时进度条 */}
+          {timeLeft > 0 && (
+            <div className="h-1 bg-muted rounded-full overflow-hidden">
+              <div 
+                className="h-full bg-primary transition-all duration-1000"
+                style={{ width: `${(timeLeft / 60) * 100}%` }}
+              />
+            </div>
+          )}
         </div>
       </div>
 
       {/* 主容器 */}
       <div className="max-w-7xl mx-auto px-4 py-8">
-        <div className="grid md:grid-cols-3 gap-8">
-          {/* 玩家列表 */}
-          <div className="md:col-span-2">
-            <h2 className="text-xl font-semibold text-foreground mb-4">玩家状态</h2>
-            
-            <div className="grid grid-cols-2 gap-4 mb-8">
-              {players.map((player, idx) => (
-                <div
-                  key={player.id}
-                  className={`border rounded-lg p-4 transition-colors ${
-                    player.isAlive
-                      ? 'bg-card border-border hover:border-accent'
-                      : 'bg-card/30 border-border/30 opacity-60'
-                  } ${player === currentPlayer ? 'ring-2 ring-accent' : ''}`}
-                >
-                  <div className="flex items-start justify-between mb-2">
-                    <div>
-                      <h3 className="font-semibold text-foreground">
-                        {player.name || `玩家 ${idx + 1}`}
-                      </h3>
-                      <p className="text-xs text-muted-foreground">
-                        #{player.playerId}
-                      </p>
-                    </div>
-                    {!player.isAlive && (
-                      <span className="text-xs bg-destructive text-white px-2 py-1 rounded">
-                        已出局
-                      </span>
-                    )}
-                  </div>
-
-                  {/* 当前玩家显示身份信息 */}
-                  {player === currentPlayer && player.isAlive && (
-                    <div className="mt-3 p-2 bg-accent/10 rounded text-sm">
-                      <p className="text-foreground font-medium">
-                        当前身份: {ROLE_NAMES[player.currentRole]}
-                      </p>
-                      {player.firstRole !== player.secondRole && (
-                        <p className="text-xs text-muted-foreground">
-                          {!player.firstRoleAlive && `第二身份: ${ROLE_NAMES[player.secondRole]}`}
-                        </p>
-                      )}
-                    </div>
-                  )}
+        {/* 游戏结束画面 */}
+        {room.currentPhase === 'game_end' && (
+          <div className="text-center py-12">
+            <h2 className="text-4xl font-bold mb-4">
+              {room.winner === 'villagers' ? '好人阵营获胜' : '狼人阵营获胜'}
+            </h2>
+            <p className="text-muted-foreground mb-8">游戏结束，以下是所有玩家的身份</p>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 max-w-4xl mx-auto">
+              {players.map((player) => (
+                <div key={player.oderId} className="bg-card border border-border rounded-lg p-4">
+                  <h3 className="font-semibold text-foreground mb-2">{player.nickname}</h3>
+                  <p className="text-sm text-primary">
+                    {ROLE_NAMES[player.role1]} / {ROLE_NAMES[player.role2]}
+                  </p>
                 </div>
               ))}
             </div>
-
-            {/* 操作区域 */}
-            {currentPlayer?.isAlive && room.currentPhase !== 'game_end' && (
-              <div className="bg-card border border-border rounded-lg p-6">
-                <h3 className="text-lg font-semibold text-foreground mb-4">你的操作</h3>
-                <ActionPanel
-                  currentPhase={room.currentPhase}
-                  currentPlayer={currentPlayer}
-                  players={players}
-                  onAction={onAction}
-                />
-              </div>
-            )}
+            <Button className="mt-8" onClick={() => window.location.href = '/'}>
+              返回首页
+            </Button>
           </div>
+        )}
 
-          {/* 右侧信息面板 */}
-          <div className="space-y-6">
-            {/* 当前阶段信息 */}
-            <div className="bg-card border border-border rounded-lg p-4">
-              <h3 className="font-semibold text-foreground mb-3">阶段信息</h3>
-              <div className="text-sm space-y-2 text-muted-foreground">
-                <p>当前轮次: 第{Math.max(room.nightRound, room.dayRound)}轮</p>
-                <p>存活玩家: {players.filter(p => p.isAlive).length}/{players.length}</p>
-                <p>阶段: {phaseNames[room.currentPhase]}</p>
-              </div>
-            </div>
-
-            {/* 房主控制 */}
-            {currentPlayer?.isHost && (
-              <div className="bg-card border border-accent rounded-lg p-4">
-                <h3 className="font-semibold text-foreground mb-3">房主控制</h3>
-                <Button
-                  onClick={onSkipPhase}
-                  variant="outline"
-                  size="sm"
-                  className="w-full mb-2"
-                >
-                  ⏩ 跳过本阶段
-                </Button>
-                
-                {/* 强制终局按钮（房主双死后）*/}
-                {currentPlayer.firstRoleAlive === false && currentPlayer.secondRoleAlive === false && (
-                  <>
-                    <hr className="border-border my-3" />
-                    <p className="text-xs text-muted-foreground mb-2">强制终局</p>
-                    <Button
-                      onClick={() => onForceEnd('good')}
-                      size="sm"
-                      className="w-full mb-2 bg-accent-secondary"
+        {room.currentPhase !== 'game_end' && (
+          <div className="grid md:grid-cols-3 gap-8">
+            {/* 玩家列表 */}
+            <div className="md:col-span-2">
+              <h2 className="text-xl font-semibold text-foreground mb-4">玩家状态</h2>
+              
+              <div className="grid grid-cols-2 gap-4 mb-8">
+                {players.map((player) => {
+                  const isAlive = player.identity1Alive || player.identity2Alive
+                  const isMe = player.oderId === currentPlayer?.oderId
+                  
+                  return (
+                    <div
+                      key={player.oderId}
+                      className={`border rounded-lg p-4 transition-colors ${
+                        isAlive
+                          ? 'bg-card border-border hover:border-primary'
+                          : 'bg-card/30 border-border/30 opacity-60'
+                      } ${isMe ? 'ring-2 ring-primary' : ''}`}
                     >
-                      好人胜利
-                    </Button>
-                    <Button
-                      onClick={() => onForceEnd('werewolf')}
-                      size="sm"
-                      className="w-full bg-destructive"
-                    >
-                      狼人胜利
-                    </Button>
-                  </>
-                )}
-              </div>
-            )}
+                      <div className="flex items-start justify-between mb-2">
+                        <div>
+                          <h3 className="font-semibold text-foreground">
+                            #{player.odeerNumber} {player.nickname}
+                          </h3>
+                          <p className="text-xs text-muted-foreground">
+                            {player.identity1Alive && player.identity2Alive && '双身份存活'}
+                            {player.identity1Alive && !player.identity2Alive && '第一身份存活'}
+                            {!player.identity1Alive && player.identity2Alive && '第二身份存活'}
+                            {!player.identity1Alive && !player.identity2Alive && '已出局'}
+                          </p>
+                        </div>
+                        {!isAlive && (
+                          <span className="text-xs bg-destructive text-destructive-foreground px-2 py-1 rounded">
+                            出局
+                          </span>
+                        )}
+                      </div>
 
-            {/* 游戏日志 */}
-            <div className="bg-card border border-border rounded-lg p-4 max-h-96 overflow-y-auto">
-              <h3 className="font-semibold text-foreground mb-3">游戏日志</h3>
-              <div className="text-xs space-y-1 text-muted-foreground">
-                {room.gameLog.length === 0 ? (
-                  <p>暂无记录</p>
-                ) : (
-                  room.gameLog.slice().reverse().map((log, idx) => (
-                    <div key={idx} className="border-l-2 border-accent/30 pl-2">
-                      {log.message}
+                      {/* 当前玩家显示自己的身份 */}
+                      {isMe && isAlive && (
+                        <div className="mt-3 p-2 bg-primary/10 rounded text-sm">
+                          <p className="text-foreground font-medium">
+                            当前身份: {ROLE_NAMES[currentRole || 'villager']}
+                          </p>
+                          {player.role1 !== player.role2 && (
+                            <p className="text-xs text-muted-foreground mt-1">
+                              第一身份: {ROLE_NAMES[player.role1]} {!player.identity1Alive && '(已死)'}
+                              <br />
+                              第二身份: {ROLE_NAMES[player.role2]} {!player.identity2Alive && '(已死)'}
+                            </p>
+                          )}
+                        </div>
+                      )}
                     </div>
-                  ))
-                )}
+                  )
+                })}
+              </div>
+
+              {/* 操作区域 */}
+              {currentPlayer && (currentPlayer.identity1Alive || currentPlayer.identity2Alive) && (
+                <div className="bg-card border border-border rounded-lg p-6">
+                  <h3 className="text-lg font-semibold text-foreground mb-4">你的操作</h3>
+                  <ActionPanel
+                    currentPhase={room.currentPhase}
+                    currentRole={currentRole}
+                    players={players}
+                    currentPlayer={currentPlayer}
+                    onAction={onAction}
+                    canPerformAction={canPerformAction}
+                    room={room}
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* 右侧信息面板 */}
+            <div className="space-y-6">
+              {/* 当前阶段信息 */}
+              <div className="bg-card border border-border rounded-lg p-4">
+                <h3 className="font-semibold text-foreground mb-3">阶段信息</h3>
+                <div className="text-sm space-y-2 text-muted-foreground">
+                  <p>当前轮次: 第{room.currentDay}轮</p>
+                  <p>存活玩家: {players.filter(p => p.identity1Alive || p.identity2Alive).length}/{players.length}</p>
+                  <p>阶段: {PHASE_NAMES[room.currentPhase] || room.currentPhase}</p>
+                </div>
+              </div>
+
+              {/* 房主控制 */}
+              {isHost && (
+                <div className="bg-card border border-primary rounded-lg p-4">
+                  <h3 className="font-semibold text-foreground mb-3">房主控制</h3>
+                  <Button
+                    onClick={onSkipPhase}
+                    variant="outline"
+                    size="sm"
+                    className="w-full mb-2"
+                  >
+                    跳过本阶段
+                  </Button>
+                  
+                  {/* 强制终局按钮（房主双死后）*/}
+                  {isHostDead && (
+                    <>
+                      <hr className="border-border my-3" />
+                      <p className="text-xs text-muted-foreground mb-2">强制终局</p>
+                      <Button
+                        onClick={() => onForceEnd('villagers')}
+                        size="sm"
+                        className="w-full mb-2 bg-green-600 hover:bg-green-700"
+                      >
+                        好人胜利
+                      </Button>
+                      <Button
+                        onClick={() => onForceEnd('werewolves')}
+                        size="sm"
+                        className="w-full bg-destructive hover:bg-destructive/90"
+                      >
+                        狼人胜利
+                      </Button>
+                    </>
+                  )}
+                </div>
+              )}
+
+              {/* 游戏日志 */}
+              <div className="bg-card border border-border rounded-lg p-4 max-h-96 overflow-y-auto">
+                <h3 className="font-semibold text-foreground mb-3">游戏日志</h3>
+                <div className="text-xs space-y-1 text-muted-foreground">
+                  {room.gameLog.length === 0 ? (
+                    <p>暂无记录</p>
+                  ) : (
+                    room.gameLog.slice().reverse().map((log, idx) => (
+                      <div key={idx} className="border-l-2 border-primary/30 pl-2">
+                        {log.message}
+                      </div>
+                    ))
+                  )}
+                </div>
               </div>
             </div>
           </div>
-        </div>
+        )}
       </div>
     </main>
   )
@@ -208,94 +252,210 @@ export default function GameBoard({
 
 function ActionPanel({
   currentPhase,
-  currentPlayer,
+  currentRole,
   players,
+  currentPlayer,
   onAction,
+  canPerformAction,
+  room,
 }: {
   currentPhase: GamePhase
-  currentPlayer: Player
+  currentRole: Role | null
   players: Player[]
+  currentPlayer: Player
   onAction: (action: GameAction) => void
+  canPerformAction: (actionType: string) => boolean
+  room: GameRoom
 }) {
-  const otherPlayers = players.filter(p => p.isAlive && p.id !== currentPlayer.id)
+  const [selectedTarget, setSelectedTarget] = useState<string | null>(null)
+  const [actionSubmitted, setActionSubmitted] = useState(false)
+  
+  const alivePlayers = players.filter(p => (p.identity1Alive || p.identity2Alive) && p.oderId !== currentPlayer.oderId)
 
-  switch (currentPhase) {
-    case 'night_werewolf':
-      if (currentPlayer.currentRole === 'werewolf') {
-        return (
-          <div className="space-y-3">
-            <p className="text-sm text-muted-foreground">选择要杀害的目标</p>
-            <div className="grid grid-cols-2 gap-2">
-              {otherPlayers.map(p => (
-                <Button
-                  key={p.id}
-                  onClick={() => onAction({
-                    type: 'werewolf_kill',
-                    playerId: currentPlayer.playerId,
-                    targets: [p.playerId],
-                  })}
-                  variant="outline"
-                  className="text-sm"
-                >
-                  {p.name || `玩家${p.playerId}`}
-                </Button>
-              ))}
-            </div>
-          </div>
-        )
-      }
-      return <p className="text-muted-foreground">这个阶段与你无关，请等待</p>
+  const handleAction = (type: string, targetId?: string) => {
+    onAction({
+      type: type as GameAction['type'],
+      targetId,
+      playerId: currentPlayer.oderId,
+    })
+    setActionSubmitted(true)
+  }
 
-    case 'night_seer':
-      if (currentPlayer.currentRole === 'seer') {
-        return (
-          <div className="space-y-3">
-            <p className="text-sm text-muted-foreground">选择要查验的玩家</p>
-            <div className="grid grid-cols-2 gap-2">
-              {otherPlayers.map(p => (
-                <Button
-                  key={p.id}
-                  onClick={() => onAction({
-                    type: 'seer_check',
-                    playerId: currentPlayer.playerId,
-                    target: p.playerId,
-                  })}
-                  variant="outline"
-                  className="text-sm"
-                >
-                  {p.name || `玩家${p.playerId}`}
-                </Button>
-              ))}
-            </div>
-          </div>
-        )
-      }
-      return <p className="text-muted-foreground">这个阶段与你无关，请等待</p>
+  if (actionSubmitted) {
+    return (
+      <div className="text-center py-4">
+        <p className="text-primary font-medium">操作已提交，等待其他玩家...</p>
+      </div>
+    )
+  }
 
-    case 'day_vote':
+  // 狼人阶段
+  if (currentPhase === 'night_werewolf') {
+    if (canPerformAction('werewolf_kill')) {
       return (
         <div className="space-y-3">
-          <p className="text-sm text-muted-foreground">投票出局一名玩家</p>
+          <p className="text-sm text-muted-foreground">选择要杀害的目标</p>
           <div className="grid grid-cols-2 gap-2">
-            {otherPlayers.map(p => (
+            {alivePlayers.map(p => (
               <Button
-                key={p.id}
-                onClick={() => onAction({
-                  type: 'vote',
-                  playerId: currentPlayer.playerId,
-                  target: p.playerId,
-                })}
+                key={p.oderId}
+                onClick={() => handleAction('werewolf_kill', p.oderId)}
                 variant="outline"
-                className="text-sm"
+                className="text-sm hover:bg-destructive hover:text-destructive-foreground"
               >
-                投 {p.name || `玩家${p.playerId}`}
+                #{p.odeerNumber} {p.nickname}
               </Button>
             ))}
           </div>
         </div>
       )
-
-    default:
-      return <p className="text-muted-foreground">这个阶段与你无关，请等待</p>
+    }
+    return <p className="text-muted-foreground">狼人正在行动，请等待...</p>
   }
+
+  // 预言家阶段
+  if (currentPhase === 'night_seer') {
+    if (canPerformAction('seer_check')) {
+      return (
+        <div className="space-y-3">
+          <p className="text-sm text-muted-foreground">选择要查验的玩家</p>
+          <div className="grid grid-cols-2 gap-2">
+            {alivePlayers.map(p => (
+              <Button
+                key={p.oderId}
+                onClick={() => handleAction('seer_check', p.oderId)}
+                variant="outline"
+                className="text-sm hover:bg-blue-500 hover:text-white"
+              >
+                #{p.odeerNumber} {p.nickname}
+              </Button>
+            ))}
+          </div>
+        </div>
+      )
+    }
+    return <p className="text-muted-foreground">预言家正在查验，请等待...</p>
+  }
+
+  // 女巫阶段
+  if (currentPhase === 'night_witch') {
+    if (canPerformAction('witch_save') || canPerformAction('witch_poison')) {
+      return (
+        <div className="space-y-4">
+          {room.witchPotions.save && (
+            <div>
+              <p className="text-sm text-muted-foreground mb-2">使用解药？</p>
+              <div className="flex gap-2">
+                <Button onClick={() => handleAction('witch_save', 'save')} variant="outline" className="flex-1">
+                  使用解药
+                </Button>
+                <Button onClick={() => handleAction('witch_save')} variant="ghost" className="flex-1">
+                  不使用
+                </Button>
+              </div>
+            </div>
+          )}
+          {room.witchPotions.poison && (
+            <div>
+              <p className="text-sm text-muted-foreground mb-2">使用毒药？</p>
+              <div className="grid grid-cols-2 gap-2">
+                {alivePlayers.map(p => (
+                  <Button
+                    key={p.oderId}
+                    onClick={() => handleAction('witch_poison', p.oderId)}
+                    variant="outline"
+                    className="text-sm hover:bg-purple-500 hover:text-white"
+                  >
+                    毒 #{p.odeerNumber}
+                  </Button>
+                ))}
+                <Button onClick={() => handleAction('witch_poison')} variant="ghost">
+                  不使用
+                </Button>
+              </div>
+            </div>
+          )}
+          {!room.witchPotions.save && !room.witchPotions.poison && (
+            <p className="text-muted-foreground">你已经没有药水了</p>
+          )}
+        </div>
+      )
+    }
+    return <p className="text-muted-foreground">女巫正在行动，请等待...</p>
+  }
+
+  // 守卫阶段
+  if (currentPhase === 'night_guard') {
+    if (canPerformAction('guard_protect')) {
+      const lastTarget = room.nightActions.lastGuardTarget
+      return (
+        <div className="space-y-3">
+          <p className="text-sm text-muted-foreground">选择要保护的玩家（不可连续两夜保护同一人）</p>
+          <div className="grid grid-cols-2 gap-2">
+            {players.filter(p => p.identity1Alive || p.identity2Alive).map(p => (
+              <Button
+                key={p.oderId}
+                onClick={() => handleAction('guard_protect', p.oderId)}
+                variant="outline"
+                disabled={p.oderId === lastTarget}
+                className={`text-sm ${p.oderId === lastTarget ? 'opacity-50' : 'hover:bg-green-500 hover:text-white'}`}
+              >
+                {p.oderId === currentPlayer.oderId ? '保护自己' : `#${p.odeerNumber} ${p.nickname}`}
+              </Button>
+            ))}
+          </div>
+        </div>
+      )
+    }
+    return <p className="text-muted-foreground">守卫正在行动，请等待...</p>
+  }
+
+  // 投票阶段
+  if (currentPhase === 'day_vote' || currentPhase === 'day_revote') {
+    if (canPerformAction('vote')) {
+      return (
+        <div className="space-y-3">
+          <p className="text-sm text-muted-foreground">
+            {currentPhase === 'day_revote' ? '重新投票，选择出局玩家' : '投票选择出局玩家'}
+          </p>
+          <div className="grid grid-cols-2 gap-2">
+            {alivePlayers.map(p => (
+              <Button
+                key={p.oderId}
+                onClick={() => handleAction('vote', p.oderId)}
+                variant="outline"
+                className="text-sm hover:bg-orange-500 hover:text-white"
+              >
+                投 #{p.odeerNumber} {p.nickname}
+              </Button>
+            ))}
+          </div>
+        </div>
+      )
+    }
+  }
+
+  // 白狼王自爆
+  if (currentPhase === 'day_speech' && canPerformAction('white_wolf_explode')) {
+    return (
+      <div className="space-y-3">
+        <p className="text-sm text-destructive font-medium">你是白狼王，可以选择自爆并带走一人</p>
+        <div className="grid grid-cols-2 gap-2">
+          {alivePlayers.map(p => (
+            <Button
+              key={p.oderId}
+              onClick={() => handleAction('white_wolf_explode', p.oderId)}
+              variant="destructive"
+              className="text-sm"
+            >
+              自爆带走 #{p.odeerNumber}
+            </Button>
+          ))}
+        </div>
+      </div>
+    )
+  }
+
+  // 默认等待
+  return <p className="text-muted-foreground">当前阶段无需操作，请等待...</p>
 }

@@ -25,6 +25,21 @@ export const ROLE_NAMES: Record<Role, string> = {
 // 神职身份列表（用于判定"所有神职均已死亡"的胜利条件）
 export const SPECIAL_ROLES: Role[] = ['seer', 'witch', 'hunter', 'guard', 'white_wolf_king']
 
+// 阶段名称
+export const PHASE_NAMES: Record<string, string> = {
+  waiting: '等待中',
+  ready: '准备中',
+  night_werewolf: '狼人杀人',
+  night_seer: '预言家查验',
+  night_witch: '女巫操作',
+  night_guard: '守卫保护',
+  day_announce: '死亡公告',
+  day_speech: '白天发言',
+  day_vote: '白天投票',
+  day_revote: '重新投票',
+  game_end: '游戏结束',
+}
+
 // 技能持续时间选项（秒）
 export const SKILL_DURATIONS = [15, 20, 30] as const
 
@@ -35,7 +50,8 @@ export const SPEECH_DURATIONS = [300, 600, 900] as const // 5min, 10min, 15min
 export const VOTE_DURATIONS = [60, 120, null] as const // 1min, 2min, 无限
 
 // 最小玩家数（根据角色池计算）
-export function getMinPlayers(totalRoles: number): number {
+export function getMinPlayers(roleConfig: Record<string, number>): number {
+  const totalRoles = Object.values(roleConfig).reduce((a, b) => a + b, 0)
   return Math.ceil(totalRoles / 2)
 }
 

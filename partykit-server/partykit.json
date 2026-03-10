@@ -1,5 +1,0 @@
-{
-  "name": "werewolf-game",
-  "main": "game.ts",
-  "$schema": "https://www.partykit.io/schema.json"
-}

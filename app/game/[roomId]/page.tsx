@@ -1,23 +1,50 @@
 'use client'
 
-import { useParams } from 'next/navigation'
+import { useParams, useSearchParams } from 'next/navigation'
 import { useGame } from '@/hooks/use-game'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import GameLobby from '@/components/game/game-lobby'
 import GameBoard from '@/components/game/game-board'
 
 export default function GamePage() {
   const params = useParams()
+  const searchParams = useSearchParams()
   const roomId = params.roomId as string
-  const [playerId] = useState(() => Math.floor(Math.random() * 1000000).toString())
-  const [playerName] = useState('Player')
+  const isHostParam = searchParams.get('host') === 'true'
+  
+  const [playerId] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem(`player_${roomId}`)
+      if (stored) return stored
+      const newId = Math.random().toString(36).substring(2, 15)
+      localStorage.setItem(`player_${roomId}`, newId)
+      return newId
+    }
+    return Math.random().toString(36).substring(2, 15)
+  })
+  
+  const [playerName, setPlayerName] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem(`playerName_${roomId}`) || ''
+    }
+    return ''
+  })
+  
+  const [isNameSet, setIsNameSet] = useState(false)
 
   const game = useGame({
     roomId,
     playerId,
-    playerName,
-    isHost: false,
+    playerName: playerName || 'Player',
+    isHost: isHostParam,
   })
+
+  // 保存玩家名
+  useEffect(() => {
+    if (playerName && typeof window !== 'undefined') {
+      localStorage.setItem(`playerName_${roomId}`, playerName)
+    }
+  }, [playerName, roomId])
 
   if (game.isLoading) {
     return (
@@ -43,27 +70,33 @@ export default function GamePage() {
     )
   }
 
-  // 房间未初始化 → 显示大厅
+  // 房间未初始化 or 等待中 -> 显示大厅
   if (!game.room || game.room.currentPhase === 'waiting' || game.room.currentPhase === 'ready') {
     return (
       <GameLobby
         room={game.room}
-        players={game.players}
+        players={game.room?.players || []}
         onStartGame={game.startGame}
         currentPlayer={game.currentPlayer}
+        isHost={game.isHost}
+        timeLeft={game.timeLeft}
       />
     )
   }
 
-  // 游戏进行中 → 显示游戏板
+  // 游戏进行中 -> 显示游戏板
   return (
     <GameBoard
       room={game.room}
-      players={game.players}
+      players={game.room.players}
       currentPlayer={game.currentPlayer}
       onAction={game.sendAction}
       onSkipPhase={game.skipPhase}
       onForceEnd={game.forceEndGame}
+      isHost={game.isHost}
+      timeLeft={game.timeLeft}
+      canPerformAction={game.canPerformAction}
+      getCurrentRole={game.getCurrentRole}
     />
   )
 }

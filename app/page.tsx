@@ -18,11 +18,6 @@ export default function HomePage() {
             <h1 className="text-2xl font-bold text-foreground">狼人杀面杀助手</h1>
           </div>
           <div className="flex gap-2">
-            <Link href="/demo">
-              <Button variant="outline" className="border-border hover:border-accent hover:text-accent">
-                📋 部署指南
-              </Button>
-            </Link>
             <Link href="/rooms">
               <Button variant="outline" className="border-border hover:border-accent hover:text-accent">
                 加入房间
