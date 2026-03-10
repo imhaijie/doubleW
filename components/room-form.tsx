@@ -4,7 +4,8 @@ import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { RoleConfig, SKILL_DURATIONS, SPEECH_DURATIONS, VOTE_DURATIONS, getMinPlayers } from '@/lib/types'
+import { RoleConfig } from '@/lib/types'
+import { SKILL_DURATIONS, SPEECH_DURATIONS, getMinPlayers } from '@/lib/constants'
 
 interface RoomFormProps {
   onSubmit: (roomId: string, config: any) => void
