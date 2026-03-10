@@ -74,6 +74,8 @@ cd partykit-server && pnpm install && npx partykit dev
 
 访问 http://localhost:3000
 
+**生产部署**: 详见 [PARTYKIT_SETUP.md](./PARTYKIT_SETUP.md) 部署到 PartyKit Cloud
+
 ## 项目结构
 
 ```
