@@ -1,70 +1,65 @@
+"use server"
+
 import { createClient } from '@/lib/supabase/server'
-import { GameRoom, RoleConfig } from '@/lib/types'
-import { headers } from 'next/headers'
+import { RoleConfig } from '@/lib/types'
+
+export interface RoomData {
+  id: string
+  room_code: string
+  host_player_id: string
+  settings: {
+    skillDuration: number
+    speechDuration: number
+    voteDuration: number
+    roleConfig: RoleConfig
+  }
+  status: string
+  created_at: string
+}
 
 export async function createRoom(
-  hostId: string,
-  roomId: string,
+  hostPlayerId: string,
+  roomCode: string,
   skillDuration: number,
   speechDuration: number,
-  voteDuration: number | null,
+  voteDuration: number,
   roleConfig: RoleConfig
-): Promise<GameRoom> {
+): Promise<RoomData> {
   const supabase = await createClient()
 
-  const room: GameRoom = {
-    id: `${hostId}-${Date.now()}`,
-    roomId,
-    hostId,
-    players: [],
-    currentPhase: 'waiting',
-    nightRound: 0,
-    dayRound: 0,
-    gameLog: [],
+  const settings = {
     skillDuration,
     speechDuration,
-    voteDuration: voteDuration || 0,
-    roleConfig,
-    currentNightData: {
-      werewolfTargets: new Map(),
-      deathList: [],
-    },
-    currentDayData: {
-      deadByNight: [],
-      speakingOrder: [],
-      currentSpeaker: 0,
-      voteList: new Map(),
-    },
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
+    voteDuration,
+    roleConfig
   }
 
-  // 将房间信息存储到数据库
-  const { data, error } = await supabase.from('rooms').insert([
-    {
-      room_id: roomId,
-      host_id: hostId,
-      state: JSON.stringify(room),
-      status: 'waiting',
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    },
-  ])
+  const { data, error } = await supabase
+    .from('rooms')
+    .insert({
+      room_code: roomCode,
+      host_player_id: hostPlayerId,
+      settings,
+      status: 'waiting'
+    })
+    .select()
+    .single()
 
   if (error) {
+    console.error('创建房间失败:', error)
     throw new Error(`创建房间失败: ${error.message}`)
   }
 
-  return room
+  return data as RoomData
 }
 
-export async function getRoom(roomId: string): Promise<GameRoom | null> {
+export async function getRoomByCode(roomCode: string): Promise<RoomData | null> {
   const supabase = await createClient()
 
   const { data, error } = await supabase
     .from('rooms')
-    .select('state')
-    .eq('room_id', roomId)
+    .select('*')
+    .eq('room_code', roomCode)
     .single()
 
   if (error) {
@@ -72,27 +67,52 @@ export async function getRoom(roomId: string): Promise<GameRoom | null> {
     return null
   }
 
-  if (data && typeof data.state === 'string') {
-    return JSON.parse(data.state)
-  }
-
-  return null
+  return data as RoomData
 }
 
-export async function updateRoomState(roomId: string, room: GameRoom): Promise<void> {
+export async function getRoomById(roomId: string): Promise<RoomData | null> {
+  const supabase = await createClient()
+
+  const { data, error } = await supabase
+    .from('rooms')
+    .select('*')
+    .eq('id', roomId)
+    .single()
+
+  if (error) {
+    console.error('获取房间失败:', error)
+    return null
+  }
+
+  return data as RoomData
+}
+
+export async function updateRoomStatus(roomId: string, status: string): Promise<void> {
   const supabase = await createClient()
 
   const { error } = await supabase
     .from('rooms')
-    .update({
-      state: JSON.stringify(room),
-      status: room.currentPhase,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('room_id', roomId)
+    .update({ status })
+    .eq('id', roomId)
 
   if (error) {
-    throw new Error(`更新房间失败: ${error.message}`)
+    throw new Error(`更新房间状态失败: ${error.message}`)
+  }
+}
+
+export async function finishRoom(roomId: string): Promise<void> {
+  const supabase = await createClient()
+
+  const { error } = await supabase
+    .from('rooms')
+    .update({ 
+      status: 'finished',
+      finished_at: new Date().toISOString()
+    })
+    .eq('id', roomId)
+
+  if (error) {
+    throw new Error(`结束房间失败: ${error.message}`)
   }
 }
 
@@ -102,17 +122,20 @@ export async function deleteRoom(roomId: string): Promise<void> {
   const { error } = await supabase
     .from('rooms')
     .delete()
-    .eq('room_id', roomId)
+    .eq('id', roomId)
 
   if (error) {
     throw new Error(`删除房间失败: ${error.message}`)
   }
 }
 
-export async function listRooms(status?: string): Promise<GameRoom[]> {
+export async function listRooms(status?: string): Promise<RoomData[]> {
   const supabase = await createClient()
 
-  let query = supabase.from('rooms').select('state')
+  let query = supabase
+    .from('rooms')
+    .select('*')
+    .order('created_at', { ascending: false })
 
   if (status) {
     query = query.eq('status', status)
@@ -125,33 +148,25 @@ export async function listRooms(status?: string): Promise<GameRoom[]> {
     return []
   }
 
-  return (data || [])
-    .map(room => {
-      if (typeof room.state === 'string') {
-        return JSON.parse(room.state)
-      }
-      return null
-    })
-    .filter(Boolean)
+  return (data || []) as RoomData[]
 }
 
 export async function saveGameRecord(
   roomId: string,
-  hostId: string,
-  winner: 'good' | 'werewolf',
-  gameLog: any[]
+  players: any[],
+  actionLog: any[],
+  winner: 'villagers' | 'werewolves'
 ): Promise<void> {
   const supabase = await createClient()
 
-  const { error } = await supabase.from('game_records').insert([
-    {
+  const { error } = await supabase
+    .from('game_records')
+    .insert({
       room_id: roomId,
-      host_id: hostId,
-      winner,
-      game_log: JSON.stringify(gameLog),
-      created_at: new Date().toISOString(),
-    },
-  ])
+      players,
+      action_log: actionLog,
+      winner
+    })
 
   if (error) {
     console.error('保存游戏记录失败:', error)
