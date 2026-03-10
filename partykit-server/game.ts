@@ -1,6 +1,6 @@
 import type * as Party from "partykit/server"
-import { GameRoom, Player, GameAction, GamePhase } from "@/lib/types"
-import { GameEngine } from "@/lib/game-engine"
+import { GameRoom, Player, GameAction, GamePhase } from "./types"
+import { GameEngine } from "./game-engine"
 
 export default class GameServer implements Party.Server {
   room!: GameRoom

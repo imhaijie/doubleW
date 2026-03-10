@@ -6,10 +6,6 @@ const nextConfig = {
   images: {
     unoptimized: true,
   },
-  webpack: (config, { isServer }) => {
-    config.externals.push('partykit/server')
-    return config
-  },
 }
 
 export default nextConfig
