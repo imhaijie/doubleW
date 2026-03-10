@@ -327,71 +327,76 @@ export function useGame({ roomId, playerId, playerName, isHost = false }: UseGam
           setGameState(prev => ({ ...prev, isConnected: true, error: null }))
           
           // 加载房间数据
-          const { data: roomData } = await supabase
+          const { data: roomData, error: roomError } = await supabase
             .from("rooms")
             .select("*")
             .eq("id", roomId)
             .single()
 
-          if (roomData) {
-            const initialRoom: GameRoom = {
-              id: roomId,
-              roomCode: roomData.room_code,
-              hostPlayerId: roomData.host_player_id,
-              players: [],
-              currentPhase: "waiting",
-              currentDay: 0,
-              nightActions: {
-                werewolfKills: [],
-                seerCheck: null,
-                witchSave: null,
-                witchPoison: null,
-                guardProtect: null,
-                lastGuardTarget: null
-              },
-              votes: {},
-              gameLog: [],
-              settings: roomData.settings || {
-                roleConfig: {},
-                skillDuration: 20,
-                speechDuration: 300,
-                voteDuration: 60
-              },
-              witchPotions: { save: true, poison: true },
-              winner: null
-            }
+          console.log("[v0] 房间数据加载:", roomData, roomError)
 
-            if (isHost) {
-              initialRoom.players.push({
-                oderId: playerId,
-                odeerNumber: 1,
-                nickname: playerName,
-                role1: "villager",
-                role2: "villager",
-                identity1Alive: true,
-                identity2Alive: true,
-                isHost: true,
-                isConnected: true
-              })
-              broadcastState(initialRoom)
-            } else {
-              // 非房主请求加入
-              channel.send({
-                type: "broadcast",
-                event: "player_join",
-                payload: { playerId, playerName }
-              })
-            }
-
-            setGameState(prev => ({
-              ...prev,
-              room: initialRoom,
-              currentPlayer: initialRoom.players.find(p => p.oderId === playerId) || null,
-              isLoading: false
-            }))
-          } else {
+          if (roomError || !roomData) {
             setGameState(prev => ({ ...prev, error: "房间不存在", isLoading: false }))
+            return
           }
+
+          const settings = roomData.settings || {
+            roleConfig: {},
+            skillDuration: 20,
+            speechDuration: 300,
+            voteDuration: 60
+          }
+
+          const initialRoom: GameRoom = {
+            id: roomId,
+            roomCode: roomData.room_code,
+            hostPlayerId: roomData.host_player_id,
+            players: [],
+            currentPhase: "waiting",
+            currentDay: 0,
+            nightActions: {
+              werewolfKills: [],
+              seerCheck: null,
+              witchSave: null,
+              witchPoison: null,
+              guardProtect: null,
+              lastGuardTarget: null
+            },
+            votes: {},
+            gameLog: [],
+            settings,
+            witchPotions: { save: true, poison: true },
+            winner: null
+          }
+
+          if (isHost) {
+            initialRoom.players.push({
+              oderId: playerId,
+              odeerNumber: 1,
+              nickname: playerName,
+              role1: "villager",
+              role2: "villager",
+              identity1Alive: true,
+              identity2Alive: true,
+              isHost: true,
+              isConnected: true
+            })
+            broadcastState(initialRoom)
+          } else {
+            // 非房主请求加入
+            channel.send({
+              type: "broadcast",
+              event: "player_join",
+              payload: { playerId, playerName }
+            })
+          }
+
+          setGameState(prev => ({
+            ...prev,
+            room: initialRoom,
+            currentPlayer: initialRoom.players.find(p => p.oderId === playerId) || null,
+            isLoading: false
+          }))
         } else if (status === "CHANNEL_ERROR") {
           setGameState(prev => ({ ...prev, error: "连接失败", isConnected: false }))
         }

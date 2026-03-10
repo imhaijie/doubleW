@@ -1,50 +1,50 @@
 'use client'
 
-import { useParams, useSearchParams } from 'next/navigation'
+import { useParams } from 'next/navigation'
 import { useGame } from '@/hooks/use-game'
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import GameLobby from '@/components/game/game-lobby'
 import GameBoard from '@/components/game/game-board'
 
 export default function GamePage() {
   const params = useParams()
-  const searchParams = useSearchParams()
   const roomId = params.roomId as string
-  const isHostParam = searchParams.get('host') === 'true'
   
   const [playerId] = useState(() => {
     if (typeof window !== 'undefined') {
+      // 先检查全局的 playerId
+      const globalPlayerId = localStorage.getItem('playerId')
+      if (globalPlayerId) return globalPlayerId
+      // 再检查房间特定的
       const stored = localStorage.getItem(`player_${roomId}`)
       if (stored) return stored
-      const newId = Math.random().toString(36).substring(2, 15)
+      const newId = `player_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`
       localStorage.setItem(`player_${roomId}`, newId)
       return newId
     }
-    return Math.random().toString(36).substring(2, 15)
+    return `player_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`
   })
   
-  const [playerName, setPlayerName] = useState(() => {
+  const [playerName] = useState(() => {
     if (typeof window !== 'undefined') {
-      return localStorage.getItem(`playerName_${roomId}`) || ''
+      return localStorage.getItem('playerName') || localStorage.getItem(`playerName_${roomId}`) || 'Player'
     }
-    return ''
+    return 'Player'
   })
   
-  const [isNameSet, setIsNameSet] = useState(false)
+  const [isHost] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('isHost') === 'true'
+    }
+    return false
+  })
 
   const game = useGame({
     roomId,
     playerId,
-    playerName: playerName || 'Player',
-    isHost: isHostParam,
+    playerName,
+    isHost,
   })
-
-  // 保存玩家名
-  useEffect(() => {
-    if (playerName && typeof window !== 'undefined') {
-      localStorage.setItem(`playerName_${roomId}`, playerName)
-    }
-  }, [playerName, roomId])
 
   if (game.isLoading) {
     return (

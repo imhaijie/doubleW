@@ -5,8 +5,8 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
     const {
-      hostId,
-      roomId,
+      hostPlayerId,
+      roomCode,
       skillDuration,
       speechDuration,
       voteDuration,
@@ -14,14 +14,14 @@ export async function POST(request: NextRequest) {
     } = body
 
     // 验证输入
-    if (!hostId || !roomId || !roleConfig) {
+    if (!hostPlayerId || !roomCode || !roleConfig) {
       return NextResponse.json(
         { error: '缺少必要参数' },
         { status: 400 }
       )
     }
 
-    if (!/^[A-Z0-9]{1,20}$/.test(roomId)) {
+    if (!/^[A-Z0-9]{1,20}$/.test(roomCode)) {
       return NextResponse.json(
         { error: '房间号格式不正确' },
         { status: 400 }
@@ -29,11 +29,11 @@ export async function POST(request: NextRequest) {
     }
 
     const room = await createRoom(
-      hostId,
-      roomId,
-      skillDuration,
-      speechDuration,
-      voteDuration,
+      hostPlayerId,
+      roomCode,
+      skillDuration || 20,
+      speechDuration || 300,
+      voteDuration || 60,
       roleConfig
     )
 

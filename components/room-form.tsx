@@ -29,7 +29,7 @@ export default function RoomForm({ onSubmit, isLoading }: RoomFormProps) {
   })
 
   const totalRoles = Object.values(roleConfig).reduce((a, b) => a + b, 0)
-  const minPlayers = getMinPlayers(totalRoles)
+  const minPlayers = getMinPlayers(roleConfig)
 
   const handleRoleChange = (role: keyof RoleConfig, value: number) => {
     setRoleConfig(prev => ({

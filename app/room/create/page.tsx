@@ -11,15 +11,39 @@ export default function CreateRoomPage() {
   const router = useRouter()
   const [isLoading, setIsLoading] = useState(false)
 
-  const handleSubmit = async (roomId: string, config: any) => {
+  const handleSubmit = async (roomCode: string, config: any) => {
     setIsLoading(true)
     try {
-      // TODO: 发送到服务器创建房间
-      // 暂时导航到房间页面
-      router.push(`/game/${roomId}`)
+      // 生成玩家 ID
+      const hostPlayerId = `host_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`
+      
+      const response = await fetch('/api/rooms', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          hostPlayerId,
+          roomCode,
+          ...config
+        })
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || '创建房间失败')
+      }
+
+      const room = await response.json()
+      
+      // 保存玩家 ID 到本地存储
+      localStorage.setItem('playerId', hostPlayerId)
+      localStorage.setItem('playerName', '房主')
+      localStorage.setItem('isHost', 'true')
+      
+      // 导航到游戏页面
+      router.push(`/game/${room.id}`)
     } catch (error) {
       console.error('创建房间失败:', error)
-      alert('创建房间失败，请重试')
+      alert(error instanceof Error ? error.message : '创建房间失败，请重试')
     } finally {
       setIsLoading(false)
     }
