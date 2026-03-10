@@ -68,8 +68,8 @@ pnpm exec ts-node scripts/001_create_tables.sql
 # 在一个终端启动 Next.js
 pnpm dev
 
-# 在另一个终端启动 PartyKit
-npx partykit dev party/game.ts
+# 在另一个终端启动 PartyKit（需要进入 partykit-server 目录）
+cd partykit-server && pnpm install && npx partykit dev
 ```
 
 访问 http://localhost:3000
@@ -99,8 +99,11 @@ npx partykit dev party/game.ts
 │   └── supabase/                # Supabase 客户端
 ├── hooks/
 │   └── use-game.ts              # PartyKit 游戏钩子
-├── party/
-│   └── game.ts                  # PartyKit 服务器
+├── partykit-server/             # PartyKit 服务器（独立部署）
+│   ├── game.ts                  # PartyKit 服务器代码
+│   ├── game-engine.ts           # 游戏引擎副本
+│   ├── types.ts                 # 类型定义副本
+│   └── partykit.json            # PartyKit 配置
 └── scripts/
     └── 001_create_tables.sql    # 数据库迁移
 ```
