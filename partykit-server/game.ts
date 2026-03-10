@@ -3,20 +3,24 @@ import { GameRoom, Player, GameAction, GamePhase } from "./types"
 import { GameEngine } from "./game-engine"
 
 export default class GameServer implements Party.Server {
-  room!: GameRoom
+  readonly options = {
+    hibernate: true,
+  }
+
+  gameRoom!: GameRoom
   players: Map<string, Player> = new Map()
   phaseTimers: Map<string, NodeJS.Timeout> = new Map()
 
-  constructor(readonly party: Party.Party) {}
+  constructor(readonly room: Party.Room) {}
 
   async onConnect(conn: Party.Connection, ctx: Party.ConnectionContext) {
-    console.log(`[${this.party.id}] 玩家连接: ${conn.id}`)
+    console.log(`[${this.room.id}] Player connected: ${conn.id}`)
     
-    // 初始化房间（首次连接时）
-    if (!this.room) {
-      this.room = {
-        id: this.party.id,
-        roomId: this.party.id,
+    // Initialize game room on first connection
+    if (!this.gameRoom) {
+      this.gameRoom = {
+        id: this.room.id,
+        roomId: this.room.id,
         hostId: "",
         players: [],
         currentPhase: "waiting",
@@ -50,21 +54,21 @@ export default class GameServer implements Party.Server {
       }
     }
 
-    // 向所有玩家广播状态
+    // Broadcast state to all players
     this.broadcast({
       type: "state_sync",
       data: {
-        room: this.room,
+        room: this.gameRoom,
         players: Array.from(this.players.values()),
       },
       timestamp: Date.now(),
     })
   }
 
-  async onMessage(message: unknown, sender: Party.Connection) {
-    const msg = message as any
+  async onMessage(message: string, sender: Party.Connection) {
+    const msg = JSON.parse(message)
 
-    console.log(`[${this.party.id}] 消息来自 ${sender.id}:`, msg.type)
+    console.log(`[${this.room.id}] Message from ${sender.id}:`, msg.type)
 
     switch (msg.type) {
       case "join_room":
@@ -89,18 +93,17 @@ export default class GameServer implements Party.Server {
   }
 
   onClose(conn: Party.Connection) {
-    console.log(`[${this.party.id}] 玩家断开连接: ${conn.id}`)
+    console.log(`[${this.room.id}] Player disconnected: ${conn.id}`)
     this.handleLeaveRoom(conn)
   }
 
   private handleJoinRoom(data: any, sender: Party.Connection) {
     const { playerId, playerName } = data
     
-    // 创建玩家对象
     const player: Player = {
       id: sender.id,
       playerId,
-      roomId: this.party.id,
+      roomId: this.room.id,
       name: playerName,
       firstRole: "villager",
       secondRole: "villager",
@@ -112,12 +115,11 @@ export default class GameServer implements Party.Server {
     }
 
     this.players.set(sender.id, player)
-    this.room.players.push(player)
+    this.gameRoom.players.push(player)
 
-    // 广播玩家加入
     this.broadcast({
       type: "player_joined",
-      data: { player, totalPlayers: this.room.players.length },
+      data: { player, totalPlayers: this.gameRoom.players.length },
       timestamp: Date.now(),
     })
   }
@@ -126,19 +128,16 @@ export default class GameServer implements Party.Server {
     const player = this.players.get(conn.id)
     if (!player) return
 
-    // 移除玩家
     this.players.delete(conn.id)
-    this.room.players = this.room.players.filter(p => p.id !== conn.id)
+    this.gameRoom.players = this.gameRoom.players.filter(p => p.id !== conn.id)
 
-    // 如果房主离开，转移房主权限或结束房间
-    if (player.isHost && this.room.players.length > 0) {
-      this.room.players[0].isHost = true
+    if (player.isHost && this.gameRoom.players.length > 0) {
+      this.gameRoom.players[0].isHost = true
     }
 
-    // 广播玩家离开
     this.broadcast({
       type: "player_left",
-      data: { playerId: player.id, totalPlayers: this.room.players.length },
+      data: { playerId: player.id, totalPlayers: this.gameRoom.players.length },
       timestamp: Date.now(),
     })
   }
@@ -147,28 +146,24 @@ export default class GameServer implements Party.Server {
     const player = this.players.get(sender.id)
     if (!player?.isHost) return
 
-    // 验证玩家数量
     const minPlayers = Math.ceil(
-      Object.values(this.room.roleConfig).reduce((a, b) => a + b) / 2
+      Object.values(this.gameRoom.roleConfig).reduce((a, b) => a + b) / 2
     )
-    if (this.room.players.length < minPlayers) {
+    if (this.gameRoom.players.length < minPlayers) {
       return
     }
 
-    // 初始化游戏
-    GameEngine.initializeGame(this.room)
-    GameEngine.assignRoles(this.room)
-    this.room.currentPhase = "day_announce"
-    this.room.dayRound = 1
+    GameEngine.initializeGame(this.gameRoom)
+    GameEngine.assignRoles(this.gameRoom)
+    this.gameRoom.currentPhase = "day_announce"
+    this.gameRoom.dayRound = 1
 
-    // 广播游戏开始
     this.broadcast({
       type: "game_started",
-      data: { room: this.room },
+      data: { room: this.gameRoom },
       timestamp: Date.now(),
     })
 
-    // 启动第一个白天
     this.startPhaseTimer("day_announce")
   }
 
@@ -178,48 +173,45 @@ export default class GameServer implements Party.Server {
 
     const action = data as GameAction
 
-    // 根据阶段处理技能
-    switch (this.room.currentPhase) {
+    switch (this.gameRoom.currentPhase) {
       case "night_werewolf":
         if (player.currentRole === "werewolf") {
-          GameEngine.processNightWerewolf(this.room, [action])
+          GameEngine.processNightWerewolf(this.gameRoom, [action])
         }
         break
       case "night_seer":
         if (player.currentRole === "seer") {
-          GameEngine.processNightSeer(this.room, action)
+          GameEngine.processNightSeer(this.gameRoom, action)
         }
         break
       case "night_witch":
         if (player.currentRole === "witch") {
-          GameEngine.processNightWitch(this.room, [action])
+          GameEngine.processNightWitch(this.gameRoom, [action])
         }
         break
       case "night_guard":
         if (player.currentRole === "guard") {
-          GameEngine.processNightGuard(this.room, action)
+          GameEngine.processNightGuard(this.gameRoom, action)
         }
         break
       case "day_vote":
         if (player.isAlive) {
-          this.room.currentDayData.voteList.set(player.playerId, action.target!)
+          this.gameRoom.currentDayData.voteList.set(player.playerId, action.target!)
         }
         break
       case "white_wolf_explode":
         if (player.currentRole === "white_wolf_king") {
-          GameEngine.executeWhiteWolfExplode(this.room, player.playerId, action.target!)
+          GameEngine.executeWhiteWolfExplode(this.gameRoom, player.playerId, action.target!)
         }
         break
     }
 
-    // 广播技能执行
     this.broadcast({
       type: "action_executed",
       data: { playerId: player.playerId, action },
       timestamp: Date.now(),
     })
 
-    // 检查当前阶段是否可以推进
     this.checkPhaseCompletion()
   }
 
@@ -227,40 +219,35 @@ export default class GameServer implements Party.Server {
     const player = this.players.get(sender.id)
     if (!player?.isHost) return
 
-    // 清除当前阶段计时器
-    const timerId = this.phaseTimers.get(this.room.currentPhase)
+    const timerId = this.phaseTimers.get(this.gameRoom.currentPhase)
     if (timerId) {
       clearTimeout(timerId)
-      this.phaseTimers.delete(this.room.currentPhase)
+      this.phaseTimers.delete(this.gameRoom.currentPhase)
     }
 
-    // 推进阶段
     this.advancePhase()
   }
 
   private handleForceEndGame(data: any, sender: Party.Connection) {
     const player = this.players.get(sender.id)
     
-    // 只有房主且双身份死亡才能强制终局
     if (!player?.isHost) return
     
-    // TODO: 检查房主双身份是否都已死亡
-    
     const { winner } = data
-    this.room.currentPhase = "game_end"
-    this.room.winner = winner
-    this.room.endAt = new Date().toISOString()
+    this.gameRoom.currentPhase = "game_end"
+    this.gameRoom.winner = winner
+    this.gameRoom.endAt = new Date().toISOString()
 
     this.broadcast({
       type: "game_end",
-      data: { room: this.room, winner },
+      data: { room: this.gameRoom, winner },
       timestamp: Date.now(),
     })
   }
 
   private broadcast(message: any) {
-    console.log(`[${this.party.id}] 广播:`, message.type)
-    this.party.broadcast(message)
+    console.log(`[${this.room.id}] Broadcasting:`, message.type)
+    this.room.broadcast(JSON.stringify(message))
   }
 
   private startPhaseTimer(phase: GamePhase) {
@@ -271,13 +258,13 @@ export default class GameServer implements Party.Server {
       case "night_seer":
       case "night_witch":
       case "night_guard":
-        duration = this.room.skillDuration * 1000
+        duration = this.gameRoom.skillDuration * 1000
         break
       case "day_speech":
-        duration = this.room.speechDuration * 1000
+        duration = this.gameRoom.speechDuration * 1000
         break
       case "day_vote":
-        duration = this.room.voteDuration ? this.room.voteDuration * 1000 : Infinity
+        duration = this.gameRoom.voteDuration ? this.gameRoom.voteDuration * 1000 : Infinity
         break
     }
 
@@ -290,97 +277,84 @@ export default class GameServer implements Party.Server {
   }
 
   private checkPhaseCompletion() {
-    // 检查当前阶段是否所有相关玩家都已完成操作
-    // 如果是，则推进到下一个阶段
+    // Check if all relevant players have completed their actions
   }
 
   private advancePhase() {
-    const currentPhase = this.room.currentPhase
+    const currentPhase = this.gameRoom.currentPhase
 
     switch (currentPhase) {
       case "night_werewolf":
-        this.room.currentPhase = "night_seer"
+        this.gameRoom.currentPhase = "night_seer"
         this.startPhaseTimer("night_seer")
         break
 
       case "night_seer":
-        this.room.currentPhase = "night_witch"
+        this.gameRoom.currentPhase = "night_witch"
         this.startPhaseTimer("night_witch")
         break
 
       case "night_witch":
-        this.room.currentPhase = "night_guard"
+        this.gameRoom.currentPhase = "night_guard"
         this.startPhaseTimer("night_guard")
         break
 
       case "night_guard":
-        // 计算死亡并推进到白天
-        const deathList = GameEngine.calculateNightDeaths(this.room)
-        GameEngine.executeNightDeaths(this.room, deathList)
+        const deathList = GameEngine.calculateNightDeaths(this.gameRoom)
+        GameEngine.executeNightDeaths(this.gameRoom, deathList)
         
-        // 检查猎人触发
         for (const playerId of deathList) {
-          const player = this.room.players.find(p => p.playerId === playerId)
-          if (player && GameEngine.canHunterShoot(player, this.room)) {
-            // 猎人可以开枪
-            // 暂时跳过猎人逻辑，直接进入白天
+          const player = this.gameRoom.players.find(p => p.playerId === playerId)
+          if (player && GameEngine.canHunterShoot(player, this.gameRoom)) {
+            // Hunter can shoot - skip for now
           }
         }
 
-        this.room.currentPhase = "day_announce"
-        GameEngine.advanceToNextDay(this.room)
+        this.gameRoom.currentPhase = "day_announce"
+        GameEngine.advanceToNextDay(this.gameRoom)
         break
 
       case "day_announce":
-        this.room.currentPhase = "day_speech"
+        this.gameRoom.currentPhase = "day_speech"
         this.startPhaseTimer("day_speech")
         break
 
       case "day_speech":
-        this.room.currentPhase = "day_vote"
+        this.gameRoom.currentPhase = "day_vote"
         this.startPhaseTimer("day_vote")
         break
 
       case "day_vote":
       case "day_revote":
-        // 计算投票结果
-        const voteResult = GameEngine.calculateVoteResult(this.room)
+        const voteResult = GameEngine.calculateVoteResult(this.gameRoom)
         
         if (voteResult.needRevote) {
-          this.room.currentPhase = "day_revote"
+          this.gameRoom.currentPhase = "day_revote"
           this.startPhaseTimer("day_vote")
           break
         } else {
-          // 执行出局
-          GameEngine.executeDayElimination(this.room, voteResult.eliminated)
+          GameEngine.executeDayElimination(this.gameRoom, voteResult.eliminated)
+          GameEngine.checkGameEnd(this.gameRoom)
           
-          // 检查游戏是否结束
-          GameEngine.checkGameEnd(this.room)
-          
-          if (this.room.currentPhase === "game_end") {
-            // 游戏结束
+          if (this.gameRoom.currentPhase === "game_end") {
             this.broadcast({
               type: "game_end",
-              data: { room: this.room, winner: this.room.winner },
+              data: { room: this.gameRoom, winner: this.gameRoom.winner },
               timestamp: Date.now(),
             })
             return
           } else {
-            // 推进到下一个夜晚
-            GameEngine.advanceToNextNight(this.room)
+            GameEngine.advanceToNextNight(this.gameRoom)
             this.startPhaseTimer("night_werewolf")
           }
         }
         break
     }
 
-    // 广播阶段更新
     this.broadcast({
       type: "phase_update",
-      data: { phase: this.room.currentPhase, room: this.room },
+      data: { phase: this.gameRoom.currentPhase, room: this.gameRoom },
       timestamp: Date.now(),
     })
   }
 }
-
-Party.serve(GameServer)
